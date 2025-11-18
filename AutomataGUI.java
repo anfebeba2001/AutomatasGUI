@@ -47,6 +47,11 @@ public class AutomataGUI extends JFrame {
         add(controlPanel, BorderLayout.NORTH);
 
         add(crearPanelInstrucciones(), BorderLayout.EAST);
+
+        JButton btnLenguaje = new JButton("Generar Lenguaje");
+        btnLenguaje.addActionListener(e -> generarLenguaje());
+        controlPanel.add(btnLenguaje);
+
     }
 
     private void validarAutomata() {
@@ -151,6 +156,31 @@ public class AutomataGUI extends JFrame {
         scrollPane.setBorder(BorderFactory.createTitledBorder("Ayuda"));
         
         return scrollPane;
+    }
+
+    private void generarLenguaje() {
+        String input = JOptionPane.showInputDialog(this, "Longitud máxima:");
+        if (input == null) return;
+
+        int n = Integer.parseInt(input);
+
+        // Recuperamos el autómata desde el panel de dibujo
+        List<Estado> estados = drawingPanel.getEstados();
+        List<Transicion> transiciones = drawingPanel.getTransiciones();
+
+        // Llamamos al generador usando las listas reales
+        List<String> cadenas = GeneradorLenguaje.generarHastaN(estados, transiciones, n);
+
+        StringBuilder sb = new StringBuilder("Cadenas aceptadas hasta longitud " + n + ":\n\n");
+        cadenas.forEach(c -> sb.append(c).append("\n"));
+
+        JTextArea area = new JTextArea(sb.toString());
+        area.setEditable(false);
+
+        JScrollPane scroll = new JScrollPane(area);
+        scroll.setPreferredSize(new Dimension(400, 400));
+
+        JOptionPane.showMessageDialog(this, scroll, "Lenguaje", JOptionPane.INFORMATION_MESSAGE);
     }
 
     public static void main(String[] args) {
