@@ -44,54 +44,112 @@ public class AutomataGUI extends JFrame {
             validarAutomata();
         });
         controlPanel.add(btnProcess);
+        
+        // --- NUEVA FUNCIONALIDAD: Generar Expresión Regular ---
+        JButton btnER = new JButton("Generar Exp. Regular (AFD)");
+        btnER.addActionListener(e -> {
+            generarExpresionRegular();
+        });
+        controlPanel.add(btnER);
+        // ----------------------------------------------------
+
         add(controlPanel, BorderLayout.NORTH);
 
         add(crearPanelInstrucciones(), BorderLayout.EAST);
-
-        JButton btnLenguaje = new JButton("Generar Lenguaje");
-        btnLenguaje.addActionListener(e -> generarLenguaje());
-        controlPanel.add(btnLenguaje);
-
     }
 
     private void validarAutomata() {
         String tipo = (String) cmbTipoAutomata.getSelectedItem();
         
         if (tipo.equals("AFD")) {
-            validarAFD();
+            if (validarAFD_Logico()) {
+                 JOptionPane.showMessageDialog(this, "¡Autómata Válido!", "Validación Exitosa (AFD)", JOptionPane.INFORMATION_MESSAGE);
+            }
         } else if (tipo.equals("AFN")) {
             JOptionPane.showMessageDialog(this, "Validación para AFN aún no implementada.", "Info", JOptionPane.INFORMATION_MESSAGE);
         } else {
             JOptionPane.showMessageDialog(this, "Validación para AFN-Lambda aún no implementada.", "Info", JOptionPane.INFORMATION_MESSAGE);
         }
     }
+    
+    // ----------------------------------------------------------------------------------
+    // ⬇️ LÓGICA DE GENERACIÓN DE EXPRESIÓN REGULAR (PARTE CLAVE) ⬇️
+    // ----------------------------------------------------------------------------------
 
-    private void validarAFD() {
+    private void generarExpresionRegular() {
+        String tipo = (String) cmbTipoAutomata.getSelectedItem();
+        
+        // 1. Verificar si el tipo de autómata es compatible con la conversión implementada
+        if (!tipo.equals("AFD")) {
+            JOptionPane.showMessageDialog(this, "La conversión a Expresión Regular solo está implementada para AFD.", "Info", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        // 2. Validar que el autómata sea un AFD válido
+        if (!validarAFD_Logico()) { 
+            mostrarError("El autómata debe ser un AFD válido para generar la Expresión Regular. Corrija los errores de validación.");
+            return;
+        }
+
+        try {
+            // 3. Ejecutar el Algoritmo de Kleene (Eliminación de Estados)
+            KleeneConverter converter = new KleeneConverter(drawingPanel.getEstados(), drawingPanel.getTransiciones());
+            ExpresionRegular er = converter.getExpresionRegular();
+
+            // 4. Mostrar el resultado
+            JTextArea textArea = new JTextArea(er.getER());
+            textArea.setEditable(false);
+            textArea.setLineWrap(true);
+            textArea.setWrapStyleWord(true);
+            JScrollPane scrollPane = new JScrollPane(textArea);
+            scrollPane.setPreferredSize(new Dimension(400, 200));
+
+            JOptionPane.showMessageDialog(this, 
+                                          scrollPane, 
+                                          "Resultado del Teorema de Kleene (ER)", 
+                                          JOptionPane.INFORMATION_MESSAGE);
+                                          
+        } catch (Exception ex) {
+            // Manejar errores como "No se encontró estado inicial", etc.
+            mostrarError("Error al generar la Expresión Regular: " + ex.getMessage());
+        }
+    }
+
+    // ----------------------------------------------------------------------------------
+    // ⬇️ LÓGICA DE VALIDACIÓN COMPARTIDA (Usada por validarAutomata y generarExpresionRegular) ⬇️
+    // ----------------------------------------------------------------------------------
+    
+    // Lógica de validación que retorna un booleano y muestra el error.
+    private boolean validarAFD_Logico() {
         List<Estado> estados = drawingPanel.getEstados();
         List<Transicion> transiciones = drawingPanel.getTransiciones();
         String alfabetoStr = txtAlfabeto.getText().replace(",", "").trim();
         
+        // 1. Alfabeto
         Set<Character> alfabeto = new HashSet<>();
         for (char c : alfabetoStr.toCharArray()) {
             alfabeto.add(c);
         }
-
-        long numIniciales = estados.stream().filter(Estado::esInicial).count();
-        if (numIniciales == 0) {
-            mostrarError("Error de AFD: No hay ningún estado inicial definido.");
-            return;
+        if (alfabeto.isEmpty()) {
+            mostrarError("Error: El alfabeto (Σ) no puede estar vacío.");
+            return false;
         }
-        if (numIniciales > 1) {
-            mostrarError("Error de AFD: Hay más de un estado inicial.");
-            return;
+
+        // 2. Iniciales
+        long numIniciales = estados.stream().filter(Estado::esInicial).count();
+        if (numIniciales != 1) {
+            mostrarError("Error de AFD: Debe haber exactamente un estado inicial.");
+            return false;
         }
         
+        // 3. Lambda
         boolean hayLambda = transiciones.stream().anyMatch(t -> t.getSimbolo().equals("λ"));
         if (hayLambda) {
             mostrarError("Error de AFD: No se permiten transiciones lambda (λ).");
-            return;
+            return false;
         }
-
+        
+        // 4. Determinismo y Completitud
         for (Estado e : estados) {
             for (Character s : alfabeto) {
                 String simboloStr = String.valueOf(s);
@@ -100,32 +158,31 @@ public class AutomataGUI extends JFrame {
                     .filter(t -> t.getOrigen() == e && t.getSimbolo().equals(simboloStr))
                     .count();
 
-                if (numTransiciones == 0) {
-                    mostrarError("Error de AFD (Determinismo): Al estado '" + e.getNombre() + "' le falta una transición para el símbolo '" + s + "'.");
-                    return;
-                }
-                if (numTransiciones > 1) {
-                    mostrarError("Error de AFD (Determinismo): El estado '" + e.getNombre() + "' tiene múltiples transiciones para el símbolo '" + s + "'.");
-                    return;
+                if (numTransiciones != 1) {
+                    mostrarError("Error de AFD (Determinismo): El estado '" + e.getNombre() + "' debe tener **una y solo una** transición para el símbolo '" + s + "'. Hay " + numTransiciones + ".");
+                    return false;
                 }
             }
         }
+        
+        // 5. Transiciones válidas (solo se permiten símbolos del alfabeto)
         for(Transicion t : transiciones) {
-            if (t.getSimbolo().length() > 1 || !alfabeto.contains(t.getSimbolo().charAt(0))) {
+             if (t.getSimbolo().length() > 1 || !alfabeto.contains(t.getSimbolo().charAt(0))) {
                  mostrarError("Error: La transición '" + t.getSimbolo() + "' no pertenece al alfabeto Σ={" + alfabetoStr + "}.");
-                 return;
-            }
+                 return false;
+             }
         }
 
-        JOptionPane.showMessageDialog(this, "¡Autómata Válido!", "Validación Exitosa (AFD)", JOptionPane.INFORMATION_MESSAGE);
+        return true;
     }
 
     private void mostrarError(String mensaje) {
-        JOptionPane.showMessageDialog(this, mensaje, "Error de Validación", JOptionPane.ERROR_MESSAGE);
+        JOptionPane.showMessageDialog(this, mensaje, "Error de Validación/Conversión", JOptionPane.ERROR_MESSAGE);
     }
 
 
     private JScrollPane crearPanelInstrucciones() {
+        // ... (Este método queda igual que tu código original) ...
         JTextPane textPane = new JTextPane();
         textPane.setContentType("text/html");
         textPane.setEditable(false);
@@ -156,31 +213,6 @@ public class AutomataGUI extends JFrame {
         scrollPane.setBorder(BorderFactory.createTitledBorder("Ayuda"));
         
         return scrollPane;
-    }
-
-    private void generarLenguaje() {
-        String input = JOptionPane.showInputDialog(this, "Longitud máxima:");
-        if (input == null) return;
-
-        int n = Integer.parseInt(input);
-
-        // Recuperamos el autómata desde el panel de dibujo
-        List<Estado> estados = drawingPanel.getEstados();
-        List<Transicion> transiciones = drawingPanel.getTransiciones();
-
-        // Llamamos al generador usando las listas reales
-        List<String> cadenas = GeneradorLenguaje.generarHastaN(estados, transiciones, n);
-
-        StringBuilder sb = new StringBuilder("Cadenas aceptadas hasta longitud " + n + ":\n\n");
-        cadenas.forEach(c -> sb.append(c).append("\n"));
-
-        JTextArea area = new JTextArea(sb.toString());
-        area.setEditable(false);
-
-        JScrollPane scroll = new JScrollPane(area);
-        scroll.setPreferredSize(new Dimension(400, 400));
-
-        JOptionPane.showMessageDialog(this, scroll, "Lenguaje", JOptionPane.INFORMATION_MESSAGE);
     }
 
     public static void main(String[] args) {
