@@ -1,59 +1,65 @@
 import java.util.*;
-import java.util.stream.Collectors;
 
 public class KleeneConverter {
 
     public static String convert(AutomataDefinition def) {
-        List<String> states = new ArrayList<>(def.getStatesQ());
-        Collections.sort(states);
+        Map<String, Map<String, RegularExpression>> graph = new TreeMap<>();
         
-        int n = states.size();
-        Map<String, Integer> stateIndex = new HashMap<>();
-        for (int i = 0; i < n; i++) stateIndex.put(states.get(i), i);
-
-        RegularExpression[][] table = new RegularExpression[n][n];
-
-        for (int i = 0; i < n; i++) {
-            for (int j = 0; j < n; j++) {
-                table[i][j] = RegularExpression.EMPTY;
-            }
-        }
+        Set<String> allStates = new HashSet<>(def.getStatesQ());
+        for (String s : allStates) graph.put(s, new TreeMap<>());
 
         for (AutomataDefinition.TransitionData t : def.getTransitionsDelta()) {
-            int u = stateIndex.get(t.getSource());
-            int v = stateIndex.get(t.getDestination());
-            RegularExpression symbol = new RegularExpression(t.getSymbol());
-            table[u][v] = table[u][v].union(symbol);
+            Map<String, RegularExpression> outgoing = graph.get(t.getSource());
+            RegularExpression current = outgoing.getOrDefault(t.getDestination(), RegularExpression.EMPTY);
+            outgoing.put(t.getDestination(), RegularExpression.union(current, RegularExpression.symbol(t.getSymbol())));
         }
 
-        for (int i = 0; i < n; i++) {
-            table[i][i] = table[i][i].union(RegularExpression.LAMBDA);
-        }
+        String startNode = "QS";
+        String finishNode = "QF";
+        
+        graph.put(startNode, new TreeMap<>());
+        graph.put(finishNode, new TreeMap<>());
 
-        for (int k = 0; k < n; k++) {
-            RegularExpression kkStar = table[k][k].star();
-            
-            for (int i = 0; i < n; i++) {
-                for (int j = 0; j < n; j++) {
-                    RegularExpression path = table[i][k].concatenate(kkStar).concatenate(table[k][j]);
-                    table[i][j] = table[i][j].union(path);
-                }
+        graph.get(startNode).put(def.getInitialState(), RegularExpression.LAMBDA);
+
+        for (String finalState : def.getFinalStates()) {
+            if (graph.containsKey(finalState)) {
+                Map<String, RegularExpression> out = graph.get(finalState);
+                RegularExpression current = out.getOrDefault(finishNode, RegularExpression.EMPTY);
+                out.put(finishNode, RegularExpression.union(current, RegularExpression.LAMBDA));
             }
         }
 
-        String initial = def.getInitialState();
-        Set<String> finals = def.getFinalStates();
-        
-        if (finals.isEmpty()) return "Ø";
+        List<String> toEliminate = new ArrayList<>(allStates);
+       
+        for (String k : toEliminate) {
+            RegularExpression loop = graph.get(k).remove(k); 
+            RegularExpression loopStar = (loop == null) ? RegularExpression.LAMBDA : RegularExpression.star(loop);
 
-        int startIndex = stateIndex.get(initial);
-        RegularExpression result = RegularExpression.EMPTY;
+            List<String> incoming = new ArrayList<>();
+            for (String s : graph.keySet()) {
+                if (graph.get(s).containsKey(k)) incoming.add(s);
+            }
+            
+            Map<String, RegularExpression> outgoing = graph.get(k); 
 
-        for (String finalState : finals) {
-            int finalIndex = stateIndex.get(finalState);
-            result = result.union(table[startIndex][finalIndex]);
+            for (String inState : incoming) {
+                RegularExpression r_in = graph.get(inState).remove(k); 
+                
+                for (Map.Entry<String, RegularExpression> entry : outgoing.entrySet()) {
+                    String outState = entry.getKey();
+                    RegularExpression r_out = entry.getValue();
+
+                    RegularExpression pathViaK = RegularExpression.concat(r_in, RegularExpression.concat(loopStar, r_out));
+                    
+                    RegularExpression existing = graph.get(inState).getOrDefault(outState, RegularExpression.EMPTY);
+                    graph.get(inState).put(outState, RegularExpression.union(existing, pathViaK));
+                }
+            }
+            graph.remove(k);
         }
 
-        return result.toString();
+        RegularExpression result = graph.get(startNode).get(finishNode);
+        return result == null ? "Ø" : result.toString();
     }
 }
